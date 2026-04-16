@@ -1,4 +1,4 @@
-API_KEY = "AIzaSyCSUqqR7ktD37c0BH8LBunc21nE-5XTCus"
+API_KEY = "Enter your API key"
 KAFKA_BROKER = "localhost:9092"
 TOPIC = "youtube-data"
 
