@@ -1150,7 +1150,6 @@ with tab4:
 with st.expander("Raw Data"):
     st.dataframe(df, width="stretch")
 
-import time
-
-time.sleep(30)
-st.rerun()
+if st.button("Refresh data"):
+    st.cache_data.clear()
+    st.rerun()
