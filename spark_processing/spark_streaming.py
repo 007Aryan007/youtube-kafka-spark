@@ -78,6 +78,7 @@ kafka_df = (
     .option("kafka.bootstrap.servers", KAFKA_BROKER)
     .option("subscribe", TOPIC)
     .option("startingOffsets", "latest")
+    .option("failOnDataLoss", "false")
     .load()
 )
 
