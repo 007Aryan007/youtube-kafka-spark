@@ -9,3 +9,6 @@ __pycache__/
 .env
 
 .venv
+*.pem
+*.key
+.env.*
