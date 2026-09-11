@@ -11,7 +11,5 @@ altair
 requests
 kafka-python
 
-# Spark / Delta processing
-pyspark
-# Optional but commonly used with Delta tables in PySpark projects:
-delta-spark
+pyspark==3.4.1
+delta-spark==2.4.0
