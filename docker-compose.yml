@@ -1,0 +1,59 @@
+version: '3.9'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+  dashboard:
+    build: .
+    depends_on:
+      - kafka
+    environment:
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-Enter your API key}
+      KAFKA_BROKER: kafka:9092
+      TOPIC: youtube-data
+    ports:
+      - "8501:8501"
+    command: streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501
+
+  producer:
+    build: .
+    depends_on:
+      - kafka
+    environment:
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-Enter your API key}
+      KAFKA_BROKER: kafka:9092
+      TOPIC: youtube-data
+    command: python data_ingestion/youtube_producer.py
+
+  spark-streaming:
+    build: .
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKER: kafka:9092
+      TOPIC: youtube-data
+      DELTA_PATH: storage/delta_tables/youtube_enriched
+      CHECKPOINT_PATH: storage/checkpoints_enriched
+    command: python spark_processing/spark_streaming.py

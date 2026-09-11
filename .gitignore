@@ -5,3 +5,7 @@ data_ingestion/config.py
 # Ignore __pycache__ and other Python artifacts
 __pycache__/
 *.pyc
+
+.env
+
+.venv

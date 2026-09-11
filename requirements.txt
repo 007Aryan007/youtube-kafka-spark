@@ -1,0 +1,17 @@
+# Core data / ML
+numpy
+pandas
+scikit-learn
+
+# Dashboard
+streamlit
+altair
+
+# Kafka / API ingestion
+requests
+kafka-python
+
+# Spark / Delta processing
+pyspark
+# Optional but commonly used with Delta tables in PySpark projects:
+delta-spark

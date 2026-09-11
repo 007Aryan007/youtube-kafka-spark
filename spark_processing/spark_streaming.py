@@ -1,3 +1,5 @@
+import os
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json
 from pyspark.sql.types import (
@@ -8,10 +10,10 @@ from pyspark.sql.types import (
     BooleanType,
 )
 
-KAFKA_BROKER = "localhost:9092"
-TOPIC = "youtube-data"
-DELTA_PATH = "storage/delta_tables/youtube_enriched"
-CHECKPOINT_PATH = "storage/checkpoints_enriched"
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092")
+TOPIC = os.getenv("TOPIC", "youtube-data")
+DELTA_PATH = os.getenv("DELTA_PATH", "storage/delta_tables/youtube_enriched")
+CHECKPOINT_PATH = os.getenv("CHECKPOINT_PATH", "storage/checkpoints_enriched")
 
 spark = (
     SparkSession.builder.appName("YouTubeSparkStreaming")
