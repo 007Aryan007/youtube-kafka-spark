@@ -48,7 +48,7 @@ services:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-Enter your API key}
       KAFKA_BROKER: kafka:9092
       TOPIC: youtube-data
-    command: python data_ingestion/youtube_producer.py
+    command: python -u data_ingestion/youtube_producer.py
 
   spark-streaming:
     build: .
