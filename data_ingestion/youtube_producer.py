@@ -249,11 +249,7 @@ def fetch_youtube_data():
     seen = set()
 
     for region in REGIONS:
-        try:
-            category_map = fetch_category_map(region)
-        except Exception as exc:
-            print(f"[WARN] Could not fetch category map for {region}: {exc}")
-            category_map = FALLBACK_CATEGORY_MAP.copy()
+        category_map = FALLBACK_CATEGORY_MAP.copy()
 
         for category_id in CATEGORY_IDS:
             if (region, category_id) in unsupported_pairs:
