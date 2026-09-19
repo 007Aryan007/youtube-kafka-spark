@@ -15,7 +15,6 @@ from analytics.business_analysis import (
     build_category_summary,
     build_top_videos,
     build_recommendations,
-    build_views_timeseries,
     build_channel_leaderboard,
     build_engagement_vs_views_correlation,
     build_view_count_forecast_v2,
@@ -23,56 +22,84 @@ from analytics.business_analysis import (
 
 DELTA_PATH = "storage/delta_tables/youtube_enriched"
 
+def build_reach_trend(dataframe):
+    """Build a normalized reach trend from the complete available dataset."""
+    if dataframe.empty or "collected_at" not in dataframe.columns:
+        return pd.DataFrame()
+
+    columns = ["collected_at", "view_count"]
+    if "video_id" in dataframe.columns:
+        columns.append("video_id")
+
+    work = dataframe[columns].copy()
+    work["collected_at"] = pd.to_datetime(
+        work["collected_at"], errors="coerce", utc=True
+    )
+    work["view_count"] = pd.to_numeric(work["view_count"], errors="coerce")
+    work = work.dropna(subset=["collected_at", "view_count"])
+
+    if work.empty:
+        return pd.DataFrame()
+
+    # Use all records, but aggregate them into readable 6-hour periods.
+    # This prevents thousands of individual collection points from creating
+    # a noisy chart.
+    work["time_bucket"] = work["collected_at"].dt.floor("6h")
+
+    if "video_id" in work.columns:
+        trend = (
+            work.groupby("time_bucket", as_index=False)
+            .agg(
+                average_views=("view_count", "mean"),
+                videos_observed=("video_id", "nunique"),
+            )
+        )
+    else:
+        trend = (
+            work.groupby("time_bucket", as_index=False)
+            .agg(
+                average_views=("view_count", "mean"),
+                videos_observed=("view_count", "count"),
+            )
+        )
+
+    trend = trend.sort_values("time_bucket")
+    trend["smoothed_average_views"] = (
+        trend["average_views"].rolling(window=3, min_periods=1).mean()
+    )
+    return trend
+
 st.set_page_config(page_title="YouTube Business Analytics", layout="wide")
 st.title("YouTube Business Analytics Dashboard")
 st.caption("A focused view of reach, engagement, content performance, and actionable insights")
 
-
 @st.cache_data(ttl=300, show_spinner="Loading dashboard data...")
 def load_data():
-    """Load only a recent slice of the Delta parquet data.
-
-    Spark Streaming keeps the full Delta history. The dashboard only needs a
-    recent working set to stay responsive. Data is cached for 5 minutes so
-    changing filters does not reread the files from disk.
-    """
     try:
         import pyarrow.dataset as ds
 
         dataset = ds.dataset(DELTA_PATH, format="parquet")
+
+        # The Delta table stores collected_at as a string.
+        # Read the 7-day table first, then convert it to UTC timestamps.
         table = dataset.to_table()
         df = table.to_pandas()
 
         if "collected_at" in df.columns:
             df["collected_at"] = pd.to_datetime(
-                df["collected_at"], errors="coerce", utc=True
+                df["collected_at"],
+                errors="coerce",
+                utc=True,
             )
+
+            cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=48)
+            df = df[df["collected_at"] >= cutoff]
 
         return df.reset_index(drop=True)
-    except ImportError:
-        try:
-            files = list(Path(DELTA_PATH).glob("*.parquet"))
-            if not files:
-                return pd.DataFrame()
 
-            df = pd.concat(
-                [pd.read_parquet(path) for path in files],
-                ignore_index=True,
-            )
-
-            if "collected_at" in df.columns:
-                df["collected_at"] = pd.to_datetime(
-                    df["collected_at"], errors="coerce", utc=True
-                )
-
-            return df.reset_index(drop=True)
-        except Exception as exc:
-            st.error(f"Could not load dashboard data: {exc}")
-            return pd.DataFrame()
     except Exception as exc:
         st.error(f"Could not load dashboard data: {exc}")
         return pd.DataFrame()
-
 
 raw_df = load_data()
 df = prepare_dashboard_df(raw_df)
@@ -154,56 +181,160 @@ if section == "Performance":
         )
         st.altair_chart(category_chart, width="stretch")
 
-    views_ts_df = build_views_timeseries(df)
+    reach_trend_df = build_reach_trend(df)
 
-    st.subheader("Views Trend Over Time")
-    st.caption("How reach is changing across collection batches.")
+    st.subheader("Average Views per Trending Video")
+    st.caption(
+        "How the typical video's reach changes over time. "
+        "The smoothed line reduces short-term noise while using all available data."
+    )
 
-    if views_ts_df.empty:
+    if reach_trend_df.empty:
         st.info("Not enough timestamped data yet for trend analysis.")
     else:
-        views_line = (
-            alt.Chart(views_ts_df)
-            .mark_line(point=True)
-            .encode(
-                x=alt.X("time_bucket:T", title="Time"),
-                y=alt.Y("total_views:Q", title="Total Views"),
-                color=alt.Color("category_name:N", title="Category"),
-                tooltip=[
-                    alt.Tooltip("category_name:N", title="Category"),
-                    alt.Tooltip("time_bucket:T", title="Time"),
-                    alt.Tooltip("total_views:Q", title="Total Views", format=","),
-                    alt.Tooltip("total_engagements:Q", title="Engagements", format=","),
-                ],
-            )
+        base = alt.Chart(reach_trend_df).encode(
+            x=alt.X("time_bucket:T", title="Time"),
+            y=alt.Y("smoothed_average_views:Q", title="Average Views per Video"),
+            tooltip=[
+                alt.Tooltip("time_bucket:T", title="Time"),
+                alt.Tooltip(
+                    "average_views:Q",
+                    title="Average Views",
+                    format=",",
+                ),
+                alt.Tooltip(
+                    "smoothed_average_views:Q",
+                    title="Smoothed Average",
+                    format=",",
+                ),
+                alt.Tooltip(
+                    "videos_observed:Q",
+                    title="Videos Observed",
+                    format=",",
+                ),
+            ],
+        )
+
+        reach_line = (
+            base.mark_line(point=True)
             .properties(height=350)
         )
-        st.altair_chart(views_line, width="stretch")
+
+        st.altair_chart(reach_line, width="stretch")
 
     top_videos_df = build_top_videos(df)
 
-    st.subheader("Top Trending Videos")
+    st.subheader("Top Trending Videos by Reach")
+    st.caption(
+        "Videos with the highest views in the latest available collection, "
+        "with engagement metrics for context."
+    )
 
     if top_videos_df.empty:
-        st.info("No latest-batch leaderboard data available.")
+        st.info("No video leaderboard data available.")
     else:
-        display_df = top_videos_df.rename(
+        # The source trending_rank is category-specific. It should not be used
+        # as a global dashboard rank because every category can have Rank 1.
+        # Rank the latest collection by actual view count instead.
+        video_work = top_videos_df.copy()
+
+        for column in ["view_count", "like_count", "comment_count"]:
+            if column in video_work.columns:
+                video_work[column] = pd.to_numeric(
+                    video_work[column], errors="coerce"
+                ).fillna(0)
+
+        # build_top_videos already represents the latest leaderboard rows.
+        # Sort globally by audience reach so categories are compared fairly.
+        if "view_count" in video_work.columns:
+            video_work = video_work.sort_values(
+                "view_count", ascending=False
+            ).head(10)
+
+        video_display = video_work.rename(
             columns={
+                "title": "Video",
+                "channel_title": "Channel",
                 "category_name": "Category",
-                "trending_region": "Region",
-                "trending_rank": "YouTube Rank",
-                "computed_rank": "Views Rank",
                 "view_count": "Views",
                 "like_count": "Likes",
                 "comment_count": "Comments",
                 "like_rate": "Like Rate",
                 "comment_rate": "Comment Rate",
-                "channel_title": "Channel",
-                "video_id": "Video ID",
-                "title": "Title",
             }
+        ).copy()
+
+        video_display.insert(0, "Reach Rank", range(1, len(video_display) + 1))
+
+        preferred_columns = [
+            "Reach Rank",
+            "Video",
+            "Channel",
+            "Category",
+            "Views",
+            "Likes",
+            "Comments",
+            "Like Rate",
+            "Comment Rate",
+        ]
+        display_columns = [
+            column for column in preferred_columns if column in video_display.columns
+        ]
+        video_display = video_display[display_columns]
+
+        if "Video" in video_display.columns:
+            video_display["Video"] = (
+                video_display["Video"]
+                .astype(str)
+                .str.replace(r"\s+", " ", regex=True)
+                .str.strip()
+                .str.slice(0, 90)
+            )
+
+        for column in ["Views", "Likes", "Comments"]:
+            if column in video_display.columns:
+                video_display[column] = video_display[column].astype("int64")
+
+        for column in ["Like Rate", "Comment Rate"]:
+            if column in video_display.columns:
+                video_display[column] = (
+                    pd.to_numeric(video_display[column], errors="coerce") * 100
+                )
+
+        st.dataframe(
+            video_display,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Reach Rank": st.column_config.NumberColumn(
+                    "Rank", format="%d"
+                ),
+                "Video": st.column_config.TextColumn(
+                    "Video", width="large"
+                ),
+                "Channel": st.column_config.TextColumn(
+                    "Channel", width="medium"
+                ),
+                "Category": st.column_config.TextColumn(
+                    "Category", width="small"
+                ),
+                "Views": st.column_config.NumberColumn(
+                    "Views", format="%,d"
+                ),
+                "Likes": st.column_config.NumberColumn(
+                    "Likes", format="%,d"
+                ),
+                "Comments": st.column_config.NumberColumn(
+                    "Comments", format="%,d"
+                ),
+                "Like Rate": st.column_config.NumberColumn(
+                    "Like Rate", format="%.2f%%"
+                ),
+                "Comment Rate": st.column_config.NumberColumn(
+                    "Comment Rate", format="%.2f%%"
+                ),
+            },
         )
-        st.dataframe(display_df, width="stretch")
 
     channel_board_df = build_channel_leaderboard(df)
 
